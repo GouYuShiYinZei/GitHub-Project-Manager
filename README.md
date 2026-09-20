@@ -56,6 +56,8 @@ npm run build
 npm run preview -- --host 0.0.0.0 --port 4173
 ```
 
+仓库内的 `deploy/` 目录包含 systemd 和 Nginx 配置示例，适合把网页版挂到已有 HTTPS 站点的子路径。
+
 启动桌面开发窗口：
 
 ```bash
