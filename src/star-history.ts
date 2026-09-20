@@ -1,3 +1,7 @@
+import { appFetch, isTauriRuntime } from "./transport";
+
+const API_PREFIX = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/api`;
+
 export type StarHistoryRankRepo = {
   name: string;
   starsTotal: number;
@@ -22,7 +26,7 @@ export type StarHistoryRankings = {
 export async function fetchStarHistoryRankings(refresh = false, signal?: AbortSignal) {
   const response = isTauriRuntime()
     ? await fetchDirectStarHistory(signal)
-    : await appFetch(`/api/star-history/rankings${refresh ? "?refresh=1" : ""}`, { signal });
+    : await appFetch(`${API_PREFIX}/star-history/rankings${refresh ? "?refresh=1" : ""}`, { signal });
   if (!response.ok) {
     let message = "无法读取 Star History 榜单";
     try {
@@ -70,4 +74,3 @@ async function fetchDirectStarHistory(signal?: AbortSignal) {
   if (!asset.ok) throw new Error(`Star History 榜单资源返回 ${asset.status}`);
   return new Response(JSON.stringify(parseDirectBundle(await asset.text())), { status: 200, headers: { "Content-Type": "application/json" } });
 }
-import { appFetch, isTauriRuntime } from "./transport";

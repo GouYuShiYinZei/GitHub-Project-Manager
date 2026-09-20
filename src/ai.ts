@@ -2,6 +2,8 @@ import type { AnalysisCategory, GitHubRepo, RepoAnalysis, RepoCodeContext } from
 import type { AiConfig } from "./ai-config";
 import { appFetch, isTauriRuntime } from "./transport";
 
+const API_PREFIX = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/api`;
+
 export type AiRepositoryAnalysis = {
   category?: AnalysisCategory;
   projectKindZh?: string;
@@ -82,7 +84,7 @@ export async function requestAiRepositoryAnalysis(
 
   const response = isTauriRuntime()
     ? await requestDirectAi(payload, aiConfig, signal)
-    : await appFetch("/api/ai/analyze", {
+    : await appFetch(`${API_PREFIX}/ai/analyze`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
