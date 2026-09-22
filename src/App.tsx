@@ -8,6 +8,8 @@ import {
   CircleStop,
   Code2,
   ExternalLink,
+  Download,
+  Upload,
   Filter,
   GitBranch,
   KeyRound,
@@ -32,7 +34,7 @@ import { applyAiAnalysis, requestAiRepositoryAnalysis } from "./ai";
 import { clearAiConfig, EMPTY_AI_CONFIG, loadAiConfig, saveAiConfig, type AiConfig } from "./ai-config";
 import { analyzeRepository, CATEGORY_COLORS, CATEGORY_LABELS } from "./analyzer";
 import { fetchAuthenticatedStarredRepos, fetchAuthenticatedUser, fetchCodeContext, fetchReadme, fetchRepositoryMetadata, fetchStarredRepos, fetchUser, GitHubApiError } from "./github";
-import { clearAiHistory, deleteAiHistoryRecord, findAiHistory, loadAiHistory, saveAppliedAiHistory, type AiHistoryRecord } from "./history";
+import { clearAiHistory, deleteAiHistoryRecord, findAiHistory, loadAiHistory, saveAppliedAiHistory, exportAiHistory, importAiHistory, type AiHistoryRecord } from "./history";
 import { clearLastAnalysis, loadLastAnalysis, saveLastAnalysis } from "./last-analysis";
 import { fetchStarHistoryRankings, type StarHistoryRankRepo, type StarHistoryRankings } from "./star-history";
 import { compareAndStoreStarredRepos, type SyncSummary } from "./sync";
@@ -631,6 +633,7 @@ function App() {
       const completed: RepoAnalysis[] = [];
       let aiBlockedReason: string | null = null;
       for (let index = 0; index < reposForReadme.length; index += 1) {
+        controller.signal.throwIfAborted();
         const repo = reposForReadme[index];
 
         setProgress({
@@ -710,9 +713,14 @@ function App() {
               });
               const ai = await requestAiRepositoryAnalysis(repo, readme, codeContext, baseAnalysis, controller.signal, aiConfig);
               const applied = applyAiAnalysis(baseAnalysis, ai);
-              setAiHistory(saveAppliedAiHistory(repo, ai, applied));
+              try {
+                setAiHistory(saveAppliedAiHistory(repo, ai, applied));
+              } catch {
+                setError("AI 分析已完成，但历史保存失败。本机空间可能不足，请导出已有历史后整理空间。");
+              }
               completed.push(applied);
             } catch (aiError) {
+              controller.signal.throwIfAborted();
               aiBlockedReason = getErrorMessage(aiError);
               setError(`AI 精准分析暂不可用：${aiBlockedReason}。后续项目已自动切换为规则分析，Star 同步和代码画像仍会继续。`);
               completed.push(baseAnalysis);
@@ -1081,6 +1089,7 @@ function App() {
           {resultsView === "history" ? (
             <HistoryResultsView
               records={aiHistory}
+              onImport={setAiHistory}
               isLoading={isLoading}
               onBack={() => setResultsView("analysis")}
               onDelete={handleDeleteHistory}
@@ -1587,18 +1596,30 @@ function UsageList({ title, items, commands = [] }: { title: string; items: stri
 
 function HistoryResultsView({
   records,
+  onImport,
   isLoading,
   onBack,
   onDelete,
   onClear,
 }: {
   records: AiHistoryRecord[];
+  onImport: (records: AiHistoryRecord[]) => void;
   isLoading: boolean;
   onBack: () => void;
   onDelete: (key: string) => void;
   onClear: () => void;
 }) {
   const [historyQuery, setHistoryQuery] = useState("");
+  const importRef = useRef<HTMLInputElement>(null);
+  const [backupMessage, setBackupMessage] = useState("");
+  function exportBackup() {
+    const url = URL.createObjectURL(new Blob([exportAiHistory(records)], { type: "application/json" }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `github-star-history-${new Date().toISOString().slice(0, 10)}.json`;
+    anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
   const visibleRecords = useMemo(() => {
     const search = normalizeSearch(historyQuery);
     if (!search) return records;
@@ -1640,6 +1661,19 @@ function HistoryResultsView({
           </div>
         </div>
         <div className="history-results-actions">
+          <input ref={importRef} type="file" accept="application/json,.json" hidden onChange={async (event) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            if (!file) return;
+            try {
+              if (file.size > 10 * 1024 * 1024) throw new Error("备份文件不能超过 10 MB");
+              const next = importAiHistory(await file.text());
+              onImport(next);
+              setBackupMessage(`导入完成，现有 ${next.length} 条历史`);
+            } catch (error) { setBackupMessage(error instanceof Error ? error.message : "导入失败"); }
+          }} />
+          <button type="button" onClick={() => importRef.current?.click()} disabled={isLoading} title="导入历史备份" aria-label="导入历史备份"><Upload size={17} /></button>
+          <button type="button" onClick={exportBackup} disabled={!records.length} title="导出历史备份" aria-label="导出历史备份"><Download size={17} /></button>
           <button type="button" onClick={onBack}>
             返回分析
           </button>
@@ -1658,6 +1692,8 @@ function HistoryResultsView({
           {visibleRecords.length} / {records.length} 条
         </span>
       </div>
+
+      {backupMessage && <p role="status">{backupMessage}</p>}
 
       {visibleRecords.length ? (
         <div className="repo-grid history-results-grid">

@@ -536,7 +536,7 @@ function escapeRegExp(value: string) {
 
 function keywordHit(text: string, keyword: string) {
   const normalized = keyword.toLowerCase();
-  if (/^[a-z0-9+#.-]{1,3}$/.test(normalized)) {
+  if (/^[a-z0-9][a-z0-9 +#./-]*$/.test(normalized)) {
     return new RegExp(`(^|[^a-z0-9])${escapeRegExp(normalized)}([^a-z0-9]|$)`, "i").test(text);
   }
   return text.includes(normalized);
@@ -713,10 +713,12 @@ function getIntentCorpus(repo: GitHubRepo, readme: string | null, context: RepoC
 }
 
 function detectSemanticIntent(repo: GitHubRepo, readme: string | null, context: RepoCodeContext | null | undefined): SemanticIntent | null {
-  const corpus = getIntentCorpus(repo, readme, context);
+  // Supporting skills and dependencies do not define the repository's product.
+  const corpus = [repo.name, repo.description, ...(repo.topics || []), getFirstParagraph(readme)].filter(Boolean).join("\n").toLowerCase();
   const matches = SEMANTIC_INTENT_RULES.map((rule) => {
     const requiredHit = !rule.requiredAny || rule.requiredAny.some((keyword) => corpus.includes(keyword.toLowerCase()));
     if (!requiredHit) return { rule, score: 0 };
+    if (rule.id === "agent-context-skills" && !/context|文本处理|上下文/i.test(corpus)) return { rule, score: 0 };
 
     const score = rule.keywords.reduce((total, keyword) => {
       const normalized = keyword.toLowerCase();
@@ -790,53 +792,15 @@ function isPdfOrOfficeTool(repo: GitHubRepo, readme: string | null, context: Rep
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
-  const readmeIntro = [
-    getReadmeTitle(readme),
-    getFirstParagraph(readme),
-    readme?.slice(0, 2500),
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
-  const codeHints = [
-    ...(context?.files || []).slice(0, 120),
-    context?.keyFiles.map((file) => file.content.slice(0, 5000)).join("\n"),
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
-
-  const strongPatterns = [
-    /\bpdfs?\b/i,
-    /\bpdfbox\b/i,
-    /\bitext\b/i,
-    /\bpoppler\b/i,
-    /\bghostscript\b/i,
-    /\btesseract\b/i,
-    /\bocr\b/i,
-    /\b(docx?|xlsx?|pptx?|odt|ods|odp)\b/i,
-    /\boffice\s+(suite|file|files|document|documents|converter|tools?|automation)\b/i,
-    /\b(file|document|pdf)\s+(converter|conversion|processor|processing|compressor|compression|merger|splitter|toolkit|tools?)\b/i,
-    /\b(convert|merge|split|compress|extract)\s+(pdf|docx?|xlsx?|pptx?|office\s+files?)\b/i,
-    /stirling[-\s]?pdf/i,
-    /文件转换|文档转换|PDF\s*工具|PDF\s*处理|OCR|合并\s*PDF|拆分\s*PDF|压缩\s*PDF/i,
-  ];
-
-  const hasStrongSignal = (value: string) => strongPatterns.some((pattern) => pattern.test(value));
-  const readmeSpecificPatterns = strongPatterns.filter((pattern) => pattern.source !== "\\bpdfs?\\b");
-  const codeSpecificPatterns = strongPatterns.filter(
-    (pattern) => !["\\bpdfs?\\b", "\\b(docx?|xlsx?|pptx?|odt|ods|odp)\\b"].includes(pattern.source),
-  );
-  const hasReadmeSpecificSignal = (value: string) => readmeSpecificPatterns.some((pattern) => pattern.test(value));
-  const hasCodeSpecificSignal = (value: string) => codeSpecificPatterns.some((pattern) => pattern.test(value));
-  const weakDocumentOnly = /\bdocument(ation)?s?\b/i.test(readmeIntro) && !hasReadmeSpecificSignal(readmeIntro);
-
-  if (hasStrongSignal(identity)) return true;
-  if (hasReadmeSpecificSignal(readmeIntro) && !weakDocumentOnly) return true;
-  return hasCodeSpecificSignal(codeHints) && /\b(pdf|office|ocr|docx?|xlsx?|pptx?)\b/i.test(`${identity} ${readmeIntro} ${codeHints}`);
+  const productText = `${identity} ${getFirstParagraph(readme) || ""}`;
+  const documentPurpose = /\b(pdf|office|ocr|docx|xlsx|pptx)\b|文档转换|文件转换/i.test(productText);
+  const operation = /convert|merge|split|compress|edit|process|tool|suite|extract|转换|合并|拆分|压缩|编辑|处理|工具/i.test(productText);
+  return documentPurpose && operation;
 }
 
 function classify(repo: GitHubRepo, readme: string | null, context: RepoCodeContext | null | undefined): AnalysisCategory {
+  if (isAwesomeList(repo)) return "docs";
+  if (/\b(userscript|tampermonkey|violentmonkey|chrome-extension|browser extension)\b/i.test([repo.description, ...(repo.topics || [])].join(" "))) return "frontend";
   const intent = detectSemanticIntent(repo, readme, context);
   if (intent) return intent.category;
   if (isAwesomeList(repo)) return "docs";
@@ -846,7 +810,7 @@ function classify(repo: GitHubRepo, readme: string | null, context: RepoCodeCont
   const scores = CATEGORY_RULES.map((rule) => {
     let score = 0;
     score += scoreKeywords(corpus.identity, rule.keywords, 5);
-    score += scoreKeywords(corpus.code, rule.keywords, 3);
+    score += scoreKeywords(corpus.code, rule.keywords, 1);
     score += scoreKeywords(corpus.readme, rule.keywords, 1);
 
     if (rule.id === "infra" && !hasInfraProductSignal(repo, context)) {
@@ -897,7 +861,7 @@ function detectFrameworks(repo: GitHubRepo, context: RepoCodeContext | null | un
     .toLowerCase();
 
   const hasDep = (name: string) => deps.includes(name);
-  const hasText = (value: string) => allText.includes(value.toLowerCase());
+  const hasText = (value: string) => keywordHit(allText, value);
 
   if (hasDep("next")) addUnique(frameworks, "Next.js");
   if (hasDep("react")) addUnique(frameworks, "React");
@@ -1002,10 +966,12 @@ function detectProjectKind(
 
   if (isAwesomeList(repo)) return ["资源清单/学习资料", "curated resource list"] as const;
   if (isPdfTool) return ["PDF/文档处理工具", "PDF/document utility"] as const;
-  if (packageJson?.bin || includesAny(corpus, ["cli", "command line", "terminal"])) return ["命令行工具", "command-line tool"] as const;
+  if (/\b(userscript|tampermonkey|violentmonkey)\b/i.test(corpus)) return ["浏览器用户脚本", "browser userscript"] as const;
+  if (/\b(chrome-extension|browser extension)\b/i.test(corpus)) return ["浏览器扩展", "browser extension"] as const;
+  if (frameworks.some((item) => ["Electron", "Tauri"].includes(item)) || category === "mobile") return ["桌面/移动应用", "desktop or mobile application"] as const;
+  if (packageJson?.bin || ["cli", "command line", "command-line", "terminal"].some((word) => keywordHit([repo.name, repo.description, ...(repo.topics || [])].join(" ").toLowerCase(), word))) return ["命令行工具", "command-line tool"] as const;
   if (frameworks.some((item) => ["React", "Vue", "Svelte", "Angular", "Next.js", "Vite"].includes(item))) return ["Web 应用/前端项目", "web application or frontend project"] as const;
   if (frameworks.some((item) => ["FastAPI", "Django", "Flask", "Express", "Fastify", "NestJS", "Spring Boot", "Gin", "Actix Web", "Axum"].includes(item))) return ["后端服务/API", "backend service or API"] as const;
-  if (frameworks.some((item) => ["Electron", "Tauri"].includes(item)) || category === "mobile") return ["桌面/移动应用", "desktop or mobile application"] as const;
   if (category === "ai") return ["AI/模型应用", "AI or machine-learning project"] as const;
   if (category === "data") return ["数据系统/存储组件", "data or storage system"] as const;
   if (category === "infra" && hasInfraProductSignal(repo, context)) return ["基础设施/部署组件", "infrastructure or deployment component"] as const;

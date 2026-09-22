@@ -14,6 +14,7 @@ GitHub Star Manager 是一个本地优先的 GitHub Star 分析器。输入 GitH
 - **AI 精准分析**：支持自定义 API Key 与 Base URL；结果会保存到浏览器历史，仓库未更新时优先复用，不重复消耗额度。
 - **榜单分析**：读取 Star History 周榜和总榜，可对榜单项目做批量 AI 分析。
 - **同步与筛选**：同步新增、移除和仓库内容更新，支持方向、来源、语言、热度和搜索筛选。
+- **历史备份**：历史页支持导出 JSON、导入合并和搜索完整分析结果，备份不包含 API Key 或 Token。
 - **桌面安装包**：基于 Tauri 2 打包 Windows MSI/NSIS 安装程序，使用系统 WebView2，不捆绑 Python 或完整 Chromium。
 
 ## 技术架构
@@ -73,9 +74,26 @@ npm run tauri:build
 生成文件位于：
 
 ```text
-src-tauri/target/release/bundle/msi/GitHub Star Manager_0.1.0_x64_en-US.msi
-src-tauri/target/release/bundle/nsis/GitHub Star Manager_0.1.0_x64-setup.exe
+src-tauri/target/release/bundle/msi/GitHub Star Manager_0.1.1_x64_en-US.msi
+src-tauri/target/release/bundle/nsis/GitHub Star Manager_0.1.1_x64-setup.exe
 ```
+
+## 历史备份与恢复
+
+打开侧栏的「AI 历史」，在完整历史页右上角导出 JSON 备份；在另一浏览器或安装版的同一页面导入即可合并。同一记录保留较新的分析，不覆盖其他历史。当前最多保留 500 条 AI 记录，导入超限或格式错误会提示，不会清空原记录。
+
+历史保存在当前网站地址对应的浏览器本地存储中，不是服务器数据库。更换域名、浏览器或设备不会自动同步；清除网站数据前请先导出。备份虽不包含认证密钥，仍可能包含私有仓库名称和分析内容，请妥善保管。
+
+同步时，单纯的 Star 数量和 `updated_at` 变化不再触发重复 AI 分析；仓库代码推送、描述或主题等分析依据变化仍会重新分析。旧 AI 历史继续复用，新版规则会在重新分析后生效，不会批量重写已保存结果。
+
+## 回归测试
+
+```bash
+npm test
+npm run build
+```
+
+测试覆盖规则误判、AI 返回格式校验、缓存兼容与历史备份合并，使用本地样例，不调用付费 AI。通过测试不代表任意仓库都能准确识别。
 
 ## 数据与隐私
 

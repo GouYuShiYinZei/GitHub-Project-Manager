@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { defineConfig, loadEnv, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+import { analysisMessages } from "./src/ai-prompt";
 
 function readBody(req: IncomingMessage) {
   return new Promise<string>((resolve, reject) => {
@@ -106,27 +107,7 @@ function aiAnalyzePlugin(apiKey: string, baseUrl: string, model: string): Plugin
           model: requestModel,
           temperature: 0.2,
           response_format: { type: "json_object" },
-          messages: [
-            {
-              role: "system",
-              content:
-                [
-                  "你是一个资深开源项目产品分析师，目标用户是想快速理解自己 star 列表的普通开发者。",
-                  "只输出 JSON，不要输出 Markdown。",
-                  "分析优先级：1) README 的标题、首段、Features/Usage/Examples；2) repo description/topics；3) 代码结构、语言、关键配置文件。代码结构只作为证据，不要喧宾夺主。",
-                  "中文字段必须是自然中文总结，不能照搬英文 README；专有名词、库名、模型名、产品名可以保留英文。",
-                  "英文字段必须只使用英文，不允许出现中文字符、中文分类名或中文结构词。",
-                  "介绍要贴切、完整、简单易懂：说清楚它具体做什么、解决什么问题、适合谁/什么场景、为什么这样判断。",
-                  "不要把 documentation/docs/README 当成 PDF/文档处理工具；只有明确 PDF、OCR、Office 文件、文件转换/合并/拆分/压缩时才归为 productivity。",
-                  "如果 README 是 awesome/list/ranking/collection，要识别为资料清单，而不是应用程序。",
-                  "usage 要提炼真实上手方式；如果 README 没有明确命令，可以写“查看 README/Release/示例目录”，不要编造具体命令。",
-                ].join("\n"),
-            },
-            {
-              role: "user",
-              content: `请分析这个 GitHub starred 仓库，返回严格 JSON：\n{\n  "category": "ai|frontend|backend|devtools|data|infra|mobile|docs|testing|media|productivity|general",\n  "projectKindZh": "中文项目形态，8-22字",\n  "projectKindEn": "English-only project kind, 3-8 words",\n  "purposeZh": "中文，90-180字。不要逐字翻译 README，要总结：它是什么、做什么、适合什么场景、主要依据。除专有名词外不要夹英文长句。",\n  "purposeEn": "English only, 45-90 words. No Chinese characters.",\n  "usage": ["中文使用方式，2-5条。命令可保留原样。不要编造不存在的命令。"],\n  "usageEn": ["English-only usage notes, 2-5 items. No Chinese characters."],\n  "frameworkStack": ["关键框架/语言/平台，最多6项"],\n  "architecture": ["中文代码结构摘要，最多4项，每项不超过40字"],\n  "evidence": ["中文判断依据，最多4项，每项不超过45字"],\n  "confidence": 0-98\n}\n\n仓库资料：\n${JSON.stringify(payload, null, 2)}`,
-            },
-          ],
+          messages: analysisMessages(payload),
         }),
       });
 

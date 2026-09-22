@@ -54,7 +54,7 @@ function snapshotOf(repo: GitHubRepo): SnapshotEntry {
 function snapshotFingerprint(entry: SnapshotEntry) {
   return JSON.stringify([
     entry.pushedAt,
-    entry.updatedAt,
+    entry.pushedAt ? null : entry.updatedAt,
     entry.description,
     entry.defaultBranch,
     entry.topics,

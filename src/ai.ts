@@ -1,8 +1,10 @@
 import type { AnalysisCategory, GitHubRepo, RepoAnalysis, RepoCodeContext } from "./types";
 import type { AiConfig } from "./ai-config";
 import { appFetch, isTauriRuntime } from "./transport";
+import { normalizeAiAnalysis } from "./ai-validation";
+import { analysisMessages } from "./ai-prompt";
 
-const API_PREFIX = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/api`;
+const API_PREFIX = `${(import.meta.env?.BASE_URL || "/").replace(/\/$/, "")}/api`;
 
 export type AiRepositoryAnalysis = {
   category?: AnalysisCategory;
@@ -106,7 +108,9 @@ export async function requestAiRepositoryAnalysis(
     throw new Error(text || `AI analysis failed: ${response.status}`);
   }
 
-  return (await response.json()) as AiRepositoryAnalysis;
+  const analysis = normalizeAiAnalysis(await response.json());
+  if (!analysis.purposeZh || !analysis.purposeEn) throw new Error("AI 未返回完整的中英文介绍，请重试");
+  return analysis;
 }
 
 async function requestDirectAi(
@@ -140,23 +144,7 @@ async function requestDirectAi(
       model,
       temperature: 0.2,
       response_format: { type: "json_object" },
-      messages: [
-        {
-          role: "system",
-          content: [
-            "你是一个资深开源项目产品分析师，目标用户是想快速理解自己 star 列表的普通开发者。",
-            "只输出 JSON，不要输出 Markdown。",
-            "分析优先级：README 的标题、首段、Features/Usage/Examples；然后看 repo description/topics；最后用代码结构、语言和关键配置文件核对结论。代码结构是证据，不要喧宾夺主。",
-            "中文字段必须是自然中文总结，不能照搬英文 README；专有名词、库名、模型名、产品名可以保留英文。英文字段只能使用英文，不允许出现中文字符。",
-            "说清楚它具体做什么、解决什么问题、适合谁/什么场景。不要把 documentation/docs/README 当成 PDF/文档处理工具；只有明确处理 PDF、OCR、Office 文件或文件转换时才归为效率工具。awesome/list/ranking/collection 应识别为资料清单。",
-            "usage 只提炼真实上手方式；没有明确命令时写查看 README、Release 或示例目录，不要编造命令。",
-          ].join("\n"),
-        },
-        {
-          role: "user",
-          content: `请分析这个 GitHub starred 仓库，返回严格 JSON。字段要求：category、projectKindZh、projectKindEn、purposeZh、purposeEn、usage、usageEn、frameworkStack、architecture、evidence、confidence。purposeZh 90-180字，purposeEn 45-90 words；usage 和 usageEn 各2-5条；英文字段不能有中文。仓库资料：${JSON.stringify(payload, null, 2)}`,
-        },
-      ],
+      messages: analysisMessages(payload),
     }),
     signal,
   });
@@ -171,7 +159,8 @@ async function requestDirectAi(
   return new Response(source.slice(start, end + 1), { status: 200, headers: { "Content-Type": "application/json" } });
 }
 
-export function applyAiAnalysis(base: RepoAnalysis, ai: AiRepositoryAnalysis): RepoAnalysis {
+export function applyAiAnalysis(base: RepoAnalysis, input: AiRepositoryAnalysis): RepoAnalysis {
+  const ai = normalizeAiAnalysis(input);
   const projectKindEn = sanitizeEnglishText(ai.projectKindEn, base.projectKindEn || "open-source project");
   const purposeEn = sanitizeEnglishText(ai.purposeEn, base.purposeEn);
 
@@ -188,7 +177,7 @@ export function applyAiAnalysis(base: RepoAnalysis, ai: AiRepositoryAnalysis): R
     frameworkStack: sanitizeStringArray(ai.frameworkStack, base.frameworkStack),
     architecture: sanitizeStringArray(ai.architecture, base.architecture),
     evidence: sanitizeStringArray(ai.evidence, base.evidence),
-    confidence: Math.max(base.confidence, ai.confidence || 0),
+    confidence: ai.confidence ?? base.confidence,
     analysisEngine: "ai",
   };
 }
