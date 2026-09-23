@@ -15,7 +15,7 @@ GitHub Star Manager 是一个本地优先的 GitHub Star 分析器。输入 GitH
 - **榜单分析**：读取 Star History 周榜和总榜，可对榜单项目做批量 AI 分析。
 - **同步与筛选**：同步新增、移除和仓库内容更新，支持方向、来源、语言、热度和搜索筛选。
 - **历史备份**：历史页支持导出 JSON、导入合并和搜索完整分析结果，备份不包含 API Key 或 Token。
-- **桌面安装包**：基于 Tauri 2 打包 Windows MSI/NSIS 安装程序，使用系统 WebView2，不捆绑 Python 或完整 Chromium。
+- **桌面安装包**：基于 Tauri 2 打包 Windows MSI/NSIS 安装程序，使用系统 WebView2。
 
 ## 技术架构
 
