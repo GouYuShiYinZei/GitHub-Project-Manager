@@ -262,10 +262,6 @@ const CATEGORY_RULES: CategoryRule[] = [
       "learning",
       "roadmap",
       "examples",
-      "ranking",
-      "rankings",
-      "top list",
-      "leaderboard",
       "榜单",
       "排行榜",
       "资料",
@@ -374,12 +370,12 @@ const SEMANTIC_INTENT_RULES: SemanticIntentRule[] = [
   {
     id: "agent-context-skills",
     category: "ai",
-    projectKindZh: "Agent 文本处理/上下文工程 Skill 集",
-    projectKindEn: "Agent text-processing and context-engineering skill set",
+    projectKindZh: "Agent 上下文工程技能合集",
+    projectKindEn: "Agent context-engineering skill collection",
     summaryZh:
-      "给 Agent 使用的 skill/提示资产集合，主要面向文本内容处理、上下文整理、压缩、提取、重写或结构化等工作流。它更像一组可复用的 Agent 能力模块，而不是传统应用项目。",
+      "向 Agent 提供可复用的上下文工程方法和任务指导，帮助开发者组织模型所需的信息、管理有限的上下文，并改进 Agent 工作流程。它以技能说明为主要交付物，而不是一个普通文本编辑器或独立聊天应用；具体技能范围以仓库中的技能目录为准。",
     summaryEn:
-      "A collection of skills or prompt assets for agents, focused on text-content handling and context-engineering workflows such as organizing, compressing, extracting, rewriting, or structuring information. It behaves more like reusable agent capability modules than a conventional application.",
+      "Reusable context-engineering methods and task guidance for agents, helping developers organize model inputs, manage limited context, and improve agent workflows. The primary deliverable is skill instructions, not a text editor or standalone chat application. The available skill directories define the actual scope.",
     signals: ["Agent Skills", "Context Engineering", "文本处理"],
     confidenceBoost: 14,
     requiredAny: ["agent skill", "skill.md", "context engineering", "context compression", "context extraction"],
@@ -565,10 +561,13 @@ function getFirstParagraph(readme: string | null) {
   const paragraph = blocks.find((block) => {
     const plain = normalizeReadmeText(cleanMarkdown(block));
     return (
-      plain.length > 60 &&
+      plain.length >= (hasCjk(plain) ? 16 : 50) &&
       !block.startsWith("#") &&
       !block.includes("shields.io") &&
       !block.includes("| ---") &&
+      !/^\s*\|/m.test(block) &&
+      !/<table\b|<h[1-6]\b/i.test(block) &&
+      !/^\s*(?:\[.*?\]\([^)]*\)\s*[·|]?\s*)+$/.test(block) &&
       !block.startsWith("<p align") &&
       !isNoisyReadmeBlock(block)
     );
@@ -583,7 +582,7 @@ function getReadmeFeatureSummary(readme: string | null) {
   const normalized = readme.replace(/\r\n/g, "\n");
   const title = getReadmeTitle(readme);
   const intro = getFirstParagraph(readme);
-  const headingMatch = normalized.match(/^#{2,4}\s+(features?|overview|what is|why|capabilities|功能|特性|亮点|概览|介绍)\b.*$/im);
+  const headingMatch = normalized.match(/^#{2,4}\s+(?:(?:features?|overview|what is|why|capabilities)\b|功能|特性|亮点|概览|介绍).*$/im);
   const bullets: string[] = [];
 
   if (headingMatch?.index !== undefined) {
@@ -593,6 +592,12 @@ function getReadmeFeatureSummary(readme: string | null) {
 
     for (const line of sectionBody.split("\n")) {
       const trimmed = line.trim();
+      if (trimmed.startsWith("|") && !/^\|[\s:|-]+\|$/.test(trimmed)) {
+        const cells = trimmed.split("|").map(cleanMarkdown).filter((cell) => /[\p{L}\p{N}]/u.test(cell));
+        if (cells.length >= 2 && !/^(特性|功能|feature)$/i.test(cells[0])) bullets.push(cells.join("："));
+        if (bullets.length >= 4) break;
+        continue;
+      }
       if (!/^[-*+]\s+/.test(trimmed) && !/^\d+\.\s+/.test(trimmed)) continue;
       const cleaned = normalizeReadmeText(cleanMarkdown(trimmed.replace(/^[-*+]\s+/, "").replace(/^\d+\.\s+/, "")));
       if (cleaned.length >= 8 && cleaned.length <= 180 && !isNoisyReadmeBlock(cleaned)) bullets.push(cleaned);
@@ -601,7 +606,6 @@ function getReadmeFeatureSummary(readme: string | null) {
   }
 
   const parts = [
-    title ? `README 标题「${title}」` : null,
     intro,
     bullets.length ? `主要功能包括：${bullets.join("；")}` : null,
   ].filter(Boolean);
@@ -646,7 +650,8 @@ function getFile(context: RepoCodeContext | null | undefined, nameOrPath: string
 }
 
 function parsePackageJson(context: RepoCodeContext | null | undefined): PackageJson | null {
-  const file = getFile(context, "package.json");
+  const file = context?.keyFiles.find((file) => file.path === "package.json") || context?.keyFiles.find((file) =>
+    file.path.endsWith("/package.json") && !/^(examples?|demos?|tests?|docs?|researcher)\//i.test(file.path));
   if (!file) return null;
   try {
     return JSON.parse(file.content) as PackageJson;
@@ -774,12 +779,13 @@ function hasInfraProductSignal(repo: GitHubRepo, context: RepoCodeContext | null
   ]);
 }
 
-function isAwesomeList(repo: GitHubRepo) {
-  const corpus = [repo.name, repo.full_name, repo.description, ...(repo.topics || [])].filter(Boolean).join(" ").toLowerCase();
+function isAwesomeList(repo: GitHubRepo, readme: string | null = null) {
+  const htmlTitle = readme?.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i)?.[1];
+  const corpus = [repo.name, repo.description, ...(repo.topics || []), getReadmeTitle(readme), htmlTitle, getFirstParagraph(readme)].filter(Boolean).join(" ").toLowerCase();
   return (
     repo.name.toLowerCase().startsWith("awesome-") ||
     repo.topics?.includes("awesome") ||
-    includesAny(corpus, ["curated list", "resource list", "top list", "ranking", "leaderboard", "榜单", "排行榜", "资源清单", "资料库"])
+    /curated (?:list|collection)|collection of (?:awesome|examples|resources)|top-charts|中文排行榜|资源清单|资料库/.test(corpus)
   );
 }
 
@@ -799,11 +805,10 @@ function isPdfOrOfficeTool(repo: GitHubRepo, readme: string | null, context: Rep
 }
 
 function classify(repo: GitHubRepo, readme: string | null, context: RepoCodeContext | null | undefined): AnalysisCategory {
-  if (isAwesomeList(repo)) return "docs";
+  if (isAwesomeList(repo, readme)) return "docs";
   if (/\b(userscript|tampermonkey|violentmonkey|chrome-extension|browser extension)\b/i.test([repo.description, ...(repo.topics || [])].join(" "))) return "frontend";
   const intent = detectSemanticIntent(repo, readme, context);
   if (intent) return intent.category;
-  if (isAwesomeList(repo)) return "docs";
   if (isPdfOrOfficeTool(repo, readme, context)) return "productivity";
 
   const corpus = getContextCorpus(repo, readme, context);
@@ -851,10 +856,12 @@ function detectPackageManager(context: RepoCodeContext | null | undefined) {
 function detectFrameworks(repo: GitHubRepo, context: RepoCodeContext | null | undefined, packageJson: PackageJson | null) {
   const frameworks: string[] = [];
   const deps = getAllPackageDeps(packageJson);
+  const primaryPath = (path: string) => !/^(examples?|demos?|tests?|docs?|researcher)\//i.test(path) && !/(?:^|\/)(?:package-lock\.json|yarn\.lock|pnpm-lock\.yaml|poetry\.lock)$/.test(path);
+  const primaryFiles = (context?.files || []).filter(primaryPath);
   const allText = [
-    ...(context?.files || []),
-    ...(context?.directories || []),
-    ...(context?.keyFiles || []).map((file) => `${file.path}\n${file.content.slice(0, 25000)}`),
+    ...primaryFiles,
+    ...(context?.directories || []).filter(primaryPath),
+    ...(context?.keyFiles || []).filter((file) => primaryPath(file.path)).map((file) => `${file.path}\n${file.content.slice(0, 25000)}`),
     repo.language,
   ]
     .join("\n")
@@ -876,6 +883,9 @@ function detectFrameworks(repo: GitHubRepo, context: RepoCodeContext | null | un
   if (hasDep("fastify")) addUnique(frameworks, "Fastify");
   if (hasDep("@nestjs/core")) addUnique(frameworks, "NestJS");
   if (hasDep("prisma")) addUnique(frameworks, "Prisma");
+  if (hasText("com.android.application") || hasText("androidmanifest.xml")) addUnique(frameworks, "Android SDK");
+  if (hasText("androidx.compose") || hasText("libs.androidx.compose")) addUnique(frameworks, "Jetpack Compose");
+  if (hasText("shizuku")) addUnique(frameworks, "Shizuku");
   if (hasText("fastapi")) addUnique(frameworks, "FastAPI");
   if (hasText("django")) addUnique(frameworks, "Django");
   if (hasText("flask")) addUnique(frameworks, "Flask");
@@ -891,8 +901,8 @@ function detectFrameworks(repo: GitHubRepo, context: RepoCodeContext | null | un
   if (hasText("actix-web")) addUnique(frameworks, "Actix Web");
   if (hasText("axum")) addUnique(frameworks, "Axum");
   if (hasText("clap")) addUnique(frameworks, "Clap CLI");
-  if (hasText("dockerfile") || (context?.files || []).some((file) => file.endsWith("Dockerfile"))) addUnique(frameworks, "Docker");
-  if ((context?.files || []).some((file) => /compose\.ya?ml$|docker-compose\.ya?ml$/i.test(file))) addUnique(frameworks, "Docker Compose");
+  if (hasText("dockerfile") || primaryFiles.some((file) => file.endsWith("Dockerfile"))) addUnique(frameworks, "Docker");
+  if (primaryFiles.some((file) => /compose\.ya?ml$|docker-compose\.ya?ml$/i.test(file))) addUnique(frameworks, "Docker Compose");
 
   return frameworks;
 }
@@ -964,7 +974,9 @@ function detectProjectKind(
     .join(" ")
     .toLowerCase();
 
-  if (isAwesomeList(repo)) return ["资源清单/学习资料", "curated resource list"] as const;
+  if (isAwesomeList(repo, readme)) return ["资源清单/学习资料", "curated resource list"] as const;
+  const identity = [repo.description, repo.name, getFirstParagraph(readme)].filter(Boolean).join(" ");
+  if (/android/i.test(identity) && /游戏|明日方舟|arknights|game/i.test(identity) && /助手|自动|任务|automat|daily tasks/i.test(identity)) return ["Android 游戏自动化助手", "Android game automation assistant"] as const;
   if (isPdfTool) return ["PDF/文档处理工具", "PDF/document utility"] as const;
   if (/\b(userscript|tampermonkey|violentmonkey)\b/i.test(corpus)) return ["浏览器用户脚本", "browser userscript"] as const;
   if (/\b(chrome-extension|browser extension)\b/i.test(corpus)) return ["浏览器扩展", "browser extension"] as const;
@@ -985,7 +997,7 @@ function deriveProfile(repo: GitHubRepo, readme: string | null, context: RepoCod
   const packageJson = parsePackageJson(context);
   const frameworks = detectFrameworks(repo, context, packageJson);
   const isPdfTool = isPdfOrOfficeTool(repo, readme, context);
-  const intent = detectSemanticIntent(repo, readme, context);
+  const intent = category === "docs" ? null : detectSemanticIntent(repo, readme, context);
   const [projectKindZh, projectKindEn] = intent
     ? ([intent.projectKindZh, intent.projectKindEn] as const)
     : detectProjectKind(repo, readme, context, category, packageJson, frameworks, isPdfTool);

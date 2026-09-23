@@ -7,3 +7,4 @@ deploy.zip
 .env.*
 !.env.example
 docs/screenshots/app-overview.png
+.local/

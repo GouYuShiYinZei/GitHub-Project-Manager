@@ -3,6 +3,7 @@ import type { AiConfig } from "./ai-config";
 import { appFetch, isTauriRuntime } from "./transport";
 import { normalizeAiAnalysis } from "./ai-validation";
 import { analysisMessages } from "./ai-prompt";
+import { selectReadmeEvidence } from "./readme-evidence";
 
 const API_PREFIX = `${(import.meta.env?.BASE_URL || "/").replace(/\/$/, "")}/api`;
 
@@ -64,23 +65,17 @@ export async function requestAiRepositoryAnalysis(
       topics: repo.topics || [],
       stars: repo.stargazers_count,
     },
-    readme: clip(readme, 12000),
+    readme: selectReadmeEvidence(readme),
     codeProfile: {
       languageBytes: context?.languageBytes || {},
+      treeStatus: context?.treeStatus || "skipped",
+      truncated: context?.truncated || false,
       files: (context?.files || []).slice(0, 220),
       directories: (context?.directories || []).slice(0, 120),
       keyFiles: (context?.keyFiles || []).map((file) => ({
         path: file.path,
         content: clip(file.content, 5000),
       })),
-    },
-    ruleAnalysis: {
-      category: baseAnalysis.category,
-      projectKindZh: baseAnalysis.projectKindZh,
-      purposeZh: baseAnalysis.purposeZh,
-      frameworkStack: baseAnalysis.frameworkStack,
-      architecture: baseAnalysis.architecture,
-      evidence: baseAnalysis.evidence,
     },
   };
 

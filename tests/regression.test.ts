@@ -5,6 +5,8 @@ import { applyAiAnalysis } from "../src/ai";
 import { exportAiHistory, findAiHistory, getRepoHistoryKey, importAiHistory, loadAiHistory, saveAiHistory } from "../src/history";
 import { compareAndStoreStarredRepos } from "../src/sync";
 import type { GitHubRepo, RepoCodeContext } from "../src/types";
+import { selectReadmeEvidence } from "../src/readme-evidence";
+import { selectKeyFiles } from "../src/github";
 
 const storage = new Map<string, string>();
 Object.defineProperty(globalThis, "localStorage", { configurable: true, value: {
@@ -91,4 +93,45 @@ test("invalid imports preserve stored records", () => {
   assert.throws(() => importAiHistory('{"format":"github-star-manager-history","version":1,"records":[{}]}'));
   assert.equal(loadAiHistory().length, 1);
   assert.equal(JSON.parse(exportAiHistory()).records[0].key, JSON.parse(previous).records[0].key);
+});
+
+test("README HTML title identifies a ranking fork without metadata", () => {
+  const result = analyzeRepository(repo(), '<h1 align="center">GitHub中文排行榜</h1>\n\n帮助你发现优秀中文项目，可以更高效地学习经验。\n\n<table><tr><td>All Language JavaScript Vue</td></tr></table>', "loaded", context(["content/charts/Python.md"]));
+  assert.equal(result.category, "docs");
+  assert.equal(result.projectKindEn, "curated resource list");
+  assert.ok(!result.purposeZh.includes("All Language"));
+});
+test("curated AI app examples are resources, not the collection's dependencies", () => {
+  const code = context(["examples/demo/package.json"]);
+  code.keyFiles = [{path:"examples/demo/package.json",content:'{"dependencies":{"react":"19","vite":"8"}}',truncated:false}];
+  const result = analyzeRepository(repo(), "# LLM Apps\n\nA curated collection of awesome LLM apps built with RAG and AI agents, with practical examples for learning.", "loaded", code);
+  assert.equal(result.category, "docs");
+  assert.ok(!result.frameworkStack.includes("React"));
+  assert.ok(!result.frameworkStack.includes("Vite"));
+});
+test("Android game assistants get concrete kinds and Chinese feature tables are readable", () => {
+  const result = analyzeRepository(repo({description:"Android 游戏自动化助手，自动完成日常任务",language:"Kotlin"}), "# Game Helper\n\n基于图像识别技术，自动完成每日游戏任务\n\n## 特性\n\n| 特性 | 说明 |\n|---|---|\n| 定时任务 | 按预设时间启动任务 |\n| 双模式 | 前台控制面板和后台运行 |", "loaded", context([]));
+  assert.equal(result.projectKindEn, "Android game automation assistant");
+  assert.match(result.purposeZh, /定时任务：按预设时间启动任务/);
+  assert.ok(!result.purposeZh.includes("|---"));
+});
+test("key file budget reserves entrypoints and actual skills, not dependency locks", () => {
+  const paths = ["package-lock.json", "skills/context/SKILL.md", "src/main.ts", ...Array.from({length:14},(_,i)=>`packages/p${i}/package.json`)];
+  const selected = selectKeyFiles(paths.map(path => ({path,type:"blob" as const,size:100}))).map(item=>item.path);
+  assert.ok(selected.includes("src/main.ts"));
+  assert.ok(selected.includes("skills/context/SKILL.md"));
+  assert.ok(!selected.includes("package-lock.json"));
+  assert.ok(selected.length <= 10);
+  assert.ok(selectKeyFiles([{path:"auth-helper",type:"blob",size:100}],"auth-helper").length);
+});
+test("long README evidence retains late installation and architecture sections", () => {
+  const readme = "# Tool\n\nA useful tool.\n\n## Changelog\n" + "Old release notes.\n".repeat(1800) + "\n## Features\nTransforms files.\n\n## Installation\n```sh\nnpm install actual-tool\n```\n\n## Architecture\nThe main service is in src/main.ts.";
+  const selected = selectReadmeEvidence(readme);
+  assert.ok(selected.length <= 16000);
+  assert.match(selected, /npm install actual-tool/);
+  assert.match(selected, /src\/main.ts/);
+});
+test("ranking software is not itself classified as a resource list", () => {
+  const result = analyzeRepository(repo({description:"An API server that computes search ranking scores and provides a leaderboard"}),null,"missing");
+  assert.notEqual(result.category,"docs");
 });

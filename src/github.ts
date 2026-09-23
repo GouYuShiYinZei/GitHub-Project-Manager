@@ -229,6 +229,8 @@ const KEY_FILE_NAMES = new Set([
   "tsconfig.json",
   "tailwind.config.js",
   "tailwind.config.ts",
+  "AndroidManifest.xml",
+  "SKILL.md",
 ]);
 
 const ENTRYPOINT_PATTERNS = [
@@ -240,6 +242,9 @@ const ENTRYPOINT_PATTERNS = [
   /^cmd\/[^/]+\/main\.go$/i,
   /^server\.(ts|js|py)$/i,
   /^api\/index\.(ts|js)$/i,
+  /(?:^|\/)MainActivity\.kt$/i,
+  /(?:^|\/)Application\.kt$/i,
+  /^[^/]+\.(sh|ps1)$/i,
 ];
 
 function repoPath(repo: GitHubRepo) {
@@ -255,9 +260,9 @@ function isKeyFile(path: string) {
   return ENTRYPOINT_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
-function selectKeyFiles(items: RepoTreeItem[]) {
+export function selectKeyFiles(items: RepoTreeItem[], repoName?: string) {
   const candidates = items
-    .filter((item) => item.type === "blob" && isKeyFile(item.path) && (item.size ?? 0) <= 180_000)
+    .filter((item) => item.type === "blob" && (isKeyFile(item.path) || item.path === repoName) && (item.size ?? 0) <= 180_000)
     .sort((a, b) => {
       const aDepth = a.path.split("/").length;
       const bDepth = b.path.split("/").length;
@@ -266,12 +271,18 @@ function selectKeyFiles(items: RepoTreeItem[]) {
 
   const highPriority = candidates.filter((item) => {
     const name = item.path.split("/").pop() || item.path;
-    return KEY_FILE_NAMES.has(name);
+    return KEY_FILE_NAMES.has(name) && !/lock/i.test(name) && name !== "SKILL.md";
   });
-  const entrypoints = candidates.filter((item) => ENTRYPOINT_PATTERNS.some((pattern) => pattern.test(item.path)));
+  const entrypoints = candidates.filter((item) => item.path === repoName || ENTRYPOINT_PATTERNS.some((pattern) => pattern.test(item.path)));
   const workflows = candidates.filter((item) => item.path.startsWith(".github/workflows/"));
 
-  return Array.from(new Map([...highPriority, ...entrypoints, ...workflows].map((item) => [item.path, item])).values()).slice(0, 10);
+  const skills = candidates.filter((item) => /(^|\/)SKILL\.md$/.test(item.path) && !/^\.(codex|claude|agents)\//.test(item.path));
+  const guides = candidates.filter((item) => /^docs?\//i.test(item.path));
+  // Reserve space for behavior and instructions instead of filling every slot with manifests.
+  return Array.from(new Map([
+    ...highPriority.slice(0, 4), ...entrypoints.slice(0, 3), ...skills.slice(0, 2), ...guides.slice(0, 1),
+    ...highPriority.slice(4), ...workflows,
+  ].map((item) => [item.path, item])).values()).slice(0, 10);
 }
 
 async function fetchRepositoryTree(repo: GitHubRepo, token: string | undefined, signal?: AbortSignal) {
@@ -364,7 +375,7 @@ export async function fetchCodeContext(
       };
     }
 
-    const selectedFiles = selectKeyFiles(treeItems);
+    const selectedFiles = selectKeyFiles(treeItems, repo.name);
     const keyFiles: RepoKeyFile[] = [];
 
     for (const item of selectedFiles) {

@@ -74,8 +74,8 @@ npm run tauri:build
 生成文件位于：
 
 ```text
-src-tauri/target/release/bundle/msi/GitHub Star Manager_0.1.1_x64_en-US.msi
-src-tauri/target/release/bundle/nsis/GitHub Star Manager_0.1.1_x64-setup.exe
+src-tauri/target/release/bundle/msi/GitHub Star Manager_0.1.2_x64_en-US.msi
+src-tauri/target/release/bundle/nsis/GitHub Star Manager_0.1.2_x64-setup.exe
 ```
 
 ## 历史备份与恢复
