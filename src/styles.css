@@ -1703,6 +1703,13 @@ a {
   -webkit-line-clamp: 2;
 }
 
+.ranking-error-note {
+  margin: -2px 0 0;
+  color: #b45309;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
 .ranking-topics span {
   border: 1px solid #e2e8f0;
   background: #ffffff;

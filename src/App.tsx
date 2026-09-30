@@ -239,6 +239,7 @@ function App() {
   const [rankingRepos, setRankingRepos] = useState<Record<string, GitHubRepo>>({});
   const [rankingReposLoading, setRankingReposLoading] = useState(false);
   const [rankingAiAnalyses, setRankingAiAnalyses] = useState<Record<string, RepoAnalysis>>({});
+  const [rankingAiErrors, setRankingAiErrors] = useState<Record<string, string>>({});
   const [rankingAiProgress, setRankingAiProgress] = useState<RankingAiProgress>(DEFAULT_RANKING_AI_PROGRESS);
   const abortRef = useRef<AbortController | null>(null);
   const rankingAiAbortRef = useRef<AbortController | null>(null);
@@ -398,10 +399,14 @@ function App() {
       message: "准备分析当前榜单",
       error: null,
     });
+    setRankingAiErrors({});
+    let failedCount = 0;
 
     for (let index = 0; index < activeRanking.repos.length; index += 1) {
+      controller.signal.throwIfAborted();
       const rankedRepo = activeRanking.repos[index];
       const key = rankedRepo.name.toLowerCase();
+      let fallbackAnalysis: RepoAnalysis | null = null;
       try {
         setRankingAiProgress({
           running: true,
@@ -426,34 +431,36 @@ function App() {
           continue;
         }
 
-        let readme: string | null = null;
-        let readmeStatus: RepoAnalysis["readmeStatus"] = "missing";
-        try {
-          const readmeResult = await fetchReadme(repo, activeToken || undefined, controller.signal);
-          readme = readmeResult.readme;
-          readmeStatus = readmeResult.status;
-        } catch (readmeError) {
-          if (readmeError instanceof DOMException && readmeError.name === "AbortError") throw readmeError;
-          readmeStatus = "error";
-        }
+        const [readmeSettled, codeSettled] = await Promise.allSettled([
+          fetchReadme(repo, activeToken || undefined, controller.signal),
+          fetchCodeContext(repo, activeToken || undefined, controller.signal),
+        ]);
+        if (readmeSettled.status === "rejected" && readmeSettled.reason instanceof DOMException && readmeSettled.reason.name === "AbortError") throw readmeSettled.reason;
+        if (codeSettled.status === "rejected" && codeSettled.reason instanceof DOMException && codeSettled.reason.name === "AbortError") throw codeSettled.reason;
 
-        const baseAnalysis = analyzeRepository(repo, readme, readmeStatus, null);
-        const ai = await requestAiRepositoryAnalysis(repo, readme, null, baseAnalysis, controller.signal, aiConfig);
+        const readme = readmeSettled.status === "fulfilled" ? readmeSettled.value.readme : null;
+        const readmeStatus: RepoAnalysis["readmeStatus"] = readmeSettled.status === "fulfilled" ? readmeSettled.value.status : "error";
+        const codeContext = codeSettled.status === "fulfilled" ? codeSettled.value.context : null;
+        const partialErrors = [
+          readmeSettled.status === "rejected" ? getErrorMessage(readmeSettled.reason) : null,
+          codeSettled.status === "rejected" ? getErrorMessage(codeSettled.reason) : null,
+        ].filter(Boolean);
+        const baseAnalysis = analyzeRepository(repo, readme, readmeStatus, codeContext, partialErrors.join("；") || undefined);
+        fallbackAnalysis = baseAnalysis;
+        const ai = await requestAiRepositoryAnalysis(repo, readme, codeContext, baseAnalysis, controller.signal, aiConfig);
         const applied = applyAiAnalysis(baseAnalysis, ai);
         setRankingAiAnalyses((current) => ({ ...current, [key]: applied }));
-        setAiHistory(saveAppliedAiHistory(repo, ai, applied));
+        try {
+          setAiHistory(saveAppliedAiHistory(repo, ai, applied));
+        } catch {
+          setRankingAiErrors((current) => ({ ...current, [key]: "AI 已完成，但历史记录保存失败" }));
+        }
       } catch (nextError) {
         if (nextError instanceof DOMException && nextError.name === "AbortError") break;
         const message = getErrorMessage(nextError);
-        setRankingAiProgress({
-          running: false,
-          current: index + 1,
-          total: activeRanking.repos.length,
-          message: `分析停在 ${rankedRepo.name}`,
-          error: message,
-        });
-        rankingAiAbortRef.current = null;
-        return;
+        failedCount += 1;
+        setRankingAiErrors((current) => ({ ...current, [key]: message }));
+        if (fallbackAnalysis) setRankingAiAnalyses((current) => ({ ...current, [key]: fallbackAnalysis! }));
       }
     }
 
@@ -462,8 +469,8 @@ function App() {
         running: false,
         current: activeRanking.repos.length,
         total: activeRanking.repos.length,
-        message: `已完成当前榜单 ${activeRanking.repos.length} 个项目的 AI 分析`,
-        error: null,
+        message: failedCount ? `已完成当前榜单分析，${failedCount} 个项目保留规则分析结果` : `已完成当前榜单 ${activeRanking.repos.length} 个项目的 AI 分析`,
+        error: failedCount ? `有 ${failedCount} 个项目的 AI 请求失败，可稍后单独重试。` : null,
       });
     } else {
       setRankingAiProgress((current) => ({ ...current, running: false, message: "已停止榜单 AI 分析" }));
@@ -1242,6 +1249,7 @@ function App() {
           activeTab={rankingTab}
           rankingRepos={rankingRepos}
           aiAnalyses={rankingAiAnalyses}
+            aiErrors={rankingAiErrors}
           aiProgress={rankingAiProgress}
           existingAnalyses={analyses}
           loading={rankingLoading}
@@ -1317,6 +1325,7 @@ function StarHistoryModal({
   activeTab,
   rankingRepos,
   aiAnalyses,
+  aiErrors,
   aiProgress,
   existingAnalyses,
   loading,
@@ -1331,6 +1340,7 @@ function StarHistoryModal({
   activeTab: RankingTab;
   rankingRepos: Record<string, GitHubRepo>;
   aiAnalyses: Record<string, RepoAnalysis>;
+  aiErrors: Record<string, string>;
   aiProgress: RankingAiProgress;
   existingAnalyses: RepoAnalysis[];
   loading: boolean;
@@ -1459,6 +1469,7 @@ function StarHistoryModal({
                 const metadata = rankingRepos[key];
                 const existing = existingByName.get(key);
                 const aiAnalysis = aiAnalyses[key];
+                const aiError = aiErrors[key];
                 const derived = aiAnalysis || existing || (metadata ? analyzeRepository(metadata, null, "missing", null) : null);
                 return (
                   <article className="ranking-card" key={item.name}>
@@ -1486,6 +1497,7 @@ function StarHistoryModal({
                     <p className="ranking-description">
                       {getRankingSummaryZh(metadata, derived, item.name)}
                     </p>
+                    {aiError && <p className="ranking-error-note">AI 分析提示：{aiError}</p>}
                     {metadata?.topics && metadata.topics.length > 0 && (
                       <div className="ranking-topics">
                         {metadata.topics.slice(0, 4).map((topic) => <span key={topic}>{topic}</span>)}

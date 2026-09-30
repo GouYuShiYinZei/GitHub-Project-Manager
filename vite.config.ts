@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { defineConfig, loadEnv, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { analysisMessages } from "./src/ai-prompt";
+import { parseStarHistoryBundle as parseValidatedStarHistoryBundle } from "./src/star-history-data";
 
 function readBody(req: IncomingMessage) {
   return new Promise<string>((resolve, reject) => {
@@ -234,7 +235,7 @@ function starHistoryPlugin(): Plugin {
         headers: { "User-Agent": "GitHub-Star-Manager/1.0" },
       });
       if (!asset.ok) throw new Error(`Star History 榜单资源返回 ${asset.status}`);
-      const data = parseStarHistoryBundle(await asset.text());
+      const data = parseValidatedStarHistoryBundle(await asset.text());
       cache = { expiresAt: Date.now() + 10 * 60 * 1000, data };
       sendJson(res, 200, data);
     } catch (error) {

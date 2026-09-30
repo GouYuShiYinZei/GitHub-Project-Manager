@@ -545,8 +545,10 @@ function addUnique(target: string[], value: string | null | undefined) {
 
 function getReadmeTitle(readme: string | null) {
   if (!readme) return null;
-  const match = readme.match(/^#\s+(.+)$/m);
-  return match ? cleanMarkdown(match[1]) : null;
+  const markdownMatch = readme.match(/^#\s+(.+)$/m);
+  if (markdownMatch) return cleanMarkdown(markdownMatch[1]);
+  const htmlMatch = readme.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i);
+  return htmlMatch ? cleanMarkdown(htmlMatch[1]) : null;
 }
 
 function getFirstParagraph(readme: string | null) {

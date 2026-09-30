@@ -7,6 +7,7 @@ import { compareAndStoreStarredRepos } from "../src/sync";
 import type { GitHubRepo, RepoCodeContext } from "../src/types";
 import { selectReadmeEvidence } from "../src/readme-evidence";
 import { selectKeyFiles } from "../src/github";
+import { normalizeStarHistoryRankings, parseStarHistoryBundle } from "../src/star-history-data";
 
 const storage = new Map<string, string>();
 Object.defineProperty(globalThis, "localStorage", { configurable: true, value: {
@@ -134,4 +135,23 @@ test("long README evidence retains late installation and architecture sections",
 test("ranking software is not itself classified as a resource list", () => {
   const result = analyzeRepository(repo({description:"An API server that computes search ranking scores and provides a leaderboard"}),null,"missing");
   assert.notEqual(result.category,"docs");
+});
+
+test("Star History data parser keeps weekly and all-time entries separate", () => {
+  const bundle = 'weeklyFrom="Sep 22, 2026",weeklyTo="Sep 28, 2026",weeklyRepos=[{name:"owner/weekly",new_stars:120,stars_total:900,rank_change:2}]; alltimeDate="Sep 29, 2026",alltimeRepos=[{name:"owner/alltime",stars_total:9000,rank_change:null}];';
+  const parsed = parseStarHistoryBundle(bundle);
+  assert.equal(parsed.weekly.repos[0].name, "owner/weekly");
+  assert.equal(parsed.weekly.repos[0].newStars, 120);
+  assert.equal(parsed.alltime.repos[0].name, "owner/alltime");
+  assert.equal(parsed.alltime.repos[0].rankChange, null);
+});
+
+test("Star History response validation drops malformed ranking rows", () => {
+  const result = normalizeStarHistoryRankings({
+    weekly: { repos: [{ name: "owner/good", newStars: 10, starsTotal: 20, rankChange: 0 }, { name: "bad", newStars: "10", starsTotal: 20, rankChange: 0 }] },
+    alltime: { repos: [{ name: "owner/good", starsTotal: 20, rankChange: 0 }] },
+  });
+  assert.equal(result.weekly.repos.length, 1);
+  assert.equal(result.alltime.repos.length, 1);
+  assert.throws(() => normalizeStarHistoryRankings({ weekly: { repos: [] }, alltime: { repos: [] } }));
 });
